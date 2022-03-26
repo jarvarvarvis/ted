@@ -8,39 +8,52 @@
 #define OFFSET(x) (1 << x)	
 
 // Function and struct definitions
-typedef void (*InputModeFunction)(int keycode);
+typedef void (*KeybindFunction)();
+
+struct Keybind
+{
+	const int *keycodes;
+	KeybindFunction function;
+};
+
+typedef void (*InputModeFallthroughHandler)(int keycode);
 
 struct InputMode
 {
 	int mode;
 	const char *name;
-	int keycode;
-	InputModeFunction handler;
-};
-
-struct CursorMovement
-{
-	int x, y;
-	int keycode, altkeycode;
-	bool relative;
+	const struct Keybind *keymap;
+	InputModeFallthroughHandler fallthrough;
 };
 
 int clampi(int x, int min, int max);
+void delbefore();
+void delunder();
 void drawui();
+void fthandleinput();
+void fthandlenormal();
 int getcharwidth(wchar_t c);
 int getcurrmode();
-void handleinput();
-void handlenormal();
+void insnewline();
 bool ismodeactive(int mode);
 void movecursor(int x, int y);
+void movedown();
+void moveleft();
+void moveright();
+void moveup();
 void quit();
+void quitmode();
 void setmode(int mode);
+void setmodeinsert();
+void setmodenormal();
 
 // Include the configuration header file
 #include "config.h"
 
+int cursorx = 0;
+int cursory = 0;
+
 const int modescount = sizeof(modes) / sizeof(struct InputMode);
-const int cmovementscount = sizeof(cmovements) / sizeof(struct CursorMovement);
 
 int
 clampi(int x, int min, int max)
@@ -48,6 +61,19 @@ clampi(int x, int min, int max)
 	if (x <= min) return min;
 	if (x >= max) return max;
 	return x;
+}
+
+void
+delbefore()
+{
+	movecursor(cursorx - 1, cursory);
+	delch();
+}
+
+void
+delunder()
+{
+	delch();
 }
 
 void 
@@ -65,6 +91,20 @@ drawui()
 	// Print version string
 	const char *vstr = "ted - Version " VERSION;
 	mvprintw(LINES - 1, COLS - strlen(vstr), vstr);
+}
+
+void
+fthandleinput(int keycode)
+{
+	addch(keycode);
+	// Move the cursor by the width of the inserted character
+	int charwidth = getcharwidth(keycode);
+	movecursor(cursorx + charwidth, cursory);
+}
+
+void
+fthandlenormal(int keycode)
+{
 }
 
 // Initialize the fake window
@@ -103,69 +143,10 @@ getcurrmode()
 }
 
 void
-handleinput(int keycode)
+insnewline()
 {
-	if (keycode == 27) {
-		if (getch() == -1) { 
-			setmode(MODE_NORMAL); 
-			return; 
-		}
-	} 
-	else if (keycode == KEY_BACKSPACE)
-	{
-		movecursor(cursorx - 1, cursory);
-		delch();
-	}
-	else if (keycode == 10) // Newline character for Enter key
-	{
-		addch('\n');
-		movecursor(0, cursory + 1);
-	}
-	else
-	{
-		int cwidth = getcharwidth(keycode);
-		addch(keycode);
-		movecursor(cursorx + cwidth, cursory);
-	}
-}
-
-void
-handlenormal(int keycode)
-{
-	// Mode keybinds
-	for (int i = 1; i < modescount; ++i)
-	{
-		if (modes[i].keycode == keycode)
-		{
-			setmode(modes[i].mode);
-			return;
-		}
-	}
-
-	// Quit when q is pressed
-	if (keycode == 'q') quit();
-	
-	// Handle cursor movements
-	for (int i = 0; i < cmovementscount; ++i)
-	{
-		if (keycode == cmovements[i].keycode ||
-		    keycode == cmovements[i].altkeycode)
-		{
-			int x, y;
-			if (cmovements[i].relative)
-			{
-				x = cursorx + cmovements[i].x;
-				y = cursory + cmovements[i].y;
-			}
-			else 
-			{
-				x = cmovements[i].x;
-				y = cmovements[i].y;
-			}
-			movecursor(x, y);
-			break;
-		}
-	}
+	addch('\n');
+	movecursor(0, cursory + 1);
 }
 
 bool
@@ -184,10 +165,27 @@ movecursor(int x, int y)
 	mvchgat(cursory, cursorx, 1, A_REVERSE, 0, NULL); // Set new attribute for new position
 }
 
+void movedown()  { movecursor(cursorx, cursory + 1); }
+void moveleft()  { movecursor(cursorx - 1, cursory); }
+void moveright() { movecursor(cursorx + 1, cursory); }
+void moveup()    { movecursor(cursorx, cursory - 1); }
+
 void 
 setmode(int mode)
 {
 	currmode = mode;
+}
+
+void
+setmodeinsert()
+{
+	setmode(MODE_INSERT);
+}
+
+void
+setmodenormal()
+{
+	setmode(MODE_NORMAL);
 }
 
 void 
@@ -198,6 +196,15 @@ quit()
 
 	endwin();
 	exit(EXIT_SUCCESS);
+}
+
+void
+quitmode()
+{
+	if (getch() == -1) { 
+		setmode(MODE_NORMAL); 
+		return; 
+	}
 }
 
 void 
@@ -214,11 +221,37 @@ run()
 
 		if (key != ERR)
 		{
-			// Call mode handler function
+			// Get current mode
 			int currmodeidx = getcurrmode();
 			if (currmodeidx != -1)
 			{
-				(*modes[currmodeidx].handler)(key);
+				// Iterate current mode's keymap
+				const struct Keybind *currkb;
+				for (currkb = modes[currmodeidx].keymap; currkb && currkb->keycodes != NULL; ++currkb)
+				{
+					// Iterate keycodes in the keymap
+					const int *currkeycode;
+					for (currkeycode = currkb->keycodes; currkeycode && *currkeycode != 0; ++currkeycode)
+					{
+						// If the current keycode matches the pressed key...
+						if (*currkeycode == key)
+						{
+							// Run the keybind function if it is valid.
+							if (currkb->function)
+							{
+								(*currkb->function)();
+								goto break_loop;
+							}
+						}
+					}
+				}
+
+				// If no key from the keymap was pressed,
+				// call the fallthrough handler function.
+				(*modes[currmodeidx].fallthrough)(key);
+
+break_loop:
+				;
 			}
 		}
 

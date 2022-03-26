@@ -8,25 +8,41 @@ enum InputModeType
 	MODE_INSERT = OFFSET(1),
 };
 
-enum InputModeType currmode = MODE_NORMAL;  // The current ted mode (The default one is the Normal mode)
-const struct InputMode modes[] = 
+#define KEY_LIST(...) (int[]) { __VA_ARGS__, 0 }
+
+const struct Keybind normalkeymap[] =
 {
-	  /* Enum value */ /* Mode name */ /* Keycode */ /* Handler function */
-	{ MODE_NORMAL,     "Normal",       0,            handlenormal         },
-	{ MODE_INSERT,     "Insert",       'i',          handleinput          },
+	  /* Keybinds */            /* Function */
+	{ KEY_LIST('h', KEY_LEFT),  moveleft      },
+	{ KEY_LIST('l', KEY_RIGHT), moveright     },
+	{ KEY_LIST('j', KEY_DOWN),  movedown      },
+	{ KEY_LIST('k', KEY_UP),    moveup        },
+	{ KEY_LIST('i'),            setmodeinsert },
+	{ KEY_LIST('x'),            delunder      },
+	{ KEY_LIST('q'),            quit          },
+	{ NULL, NULL }
 };
 
-// Cursor movement
-int cursorx = 0; // Cursor X position
-int cursory = 0; // Cursor Y position
-
-const struct CursorMovement cmovements[] =
+const struct Keybind insertkeymap[] =
 {
-	  /* X */ /* Y */  /* Keycode */ /* Alternative Keycode */ /* Relative? */
-	{ -1,      0,      'h',          KEY_LEFT,                 true  }, // Left
-	{ +1,      0,      'l',          KEY_RIGHT,                true  }, // Right
-	{  0,     -1,      'k',          KEY_UP,                   true  }, // Up
-	{  0,     +1,      'j',          KEY_DOWN,                 true  }, // Down
-	// {  ?,      0,      'a',          -1,                       false }, // Start of line
-	// {  ?,      0,      'e',          -1,                       false }, // End of line
+	  /* Keybinds */           /* Function */
+	{ KEY_LIST(27),            quitmode   },
+	{ KEY_LIST(KEY_DOWN),      movedown   },
+	{ KEY_LIST(KEY_LEFT),      moveleft   },
+	{ KEY_LIST(KEY_RIGHT),     moveright  },
+	{ KEY_LIST(KEY_UP),        moveup     },
+	{ KEY_LIST(10),            insnewline },
+	{ KEY_LIST(KEY_BACKSPACE), delbefore  },
+	{ KEY_LIST(KEY_DL),        delunder   },
+	{ NULL, NULL }
+};
+
+// The current ted mode (The default one is the Normal mode)
+enum InputModeType currmode = MODE_NORMAL;  
+
+const struct InputMode modes[] = 
+{
+	  /* Enum value */ /* Mode name */ /* Keymap */  /* Fallthrough handler function */
+	{ MODE_NORMAL,     "Normal",       normalkeymap, fthandlenormal         },
+	{ MODE_INSERT,     "Insert",       insertkeymap, fthandleinput          },
 };
