@@ -17,6 +17,8 @@ const struct Keybind normalkeymap[] =
 	{ KEY_LIST('l', KEY_RIGHT), moveright     },
 	{ KEY_LIST('j', KEY_DOWN),  movedown      },
 	{ KEY_LIST('k', KEY_UP),    moveup        },
+	{ KEY_LIST('a'),            movebol       },
+	{ KEY_LIST('e'),            moveeol       },
 	{ KEY_LIST('i'),            setmodeinsert },
 	{ KEY_LIST('x'),            delunder      },
 	{ KEY_LIST('q'),            quit          },

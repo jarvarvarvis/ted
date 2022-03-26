@@ -26,23 +26,38 @@ struct InputMode
 	InputModeFallthroughHandler fallthrough;
 };
 
+struct Buffer
+{
+	char **lines;
+	unsigned int linescnt;
+	int topline;
+};
+
 int clampi(int x, int min, int max);
+int currline(struct Buffer *buffer);
 void delbefore();
 void delunder();
 void drawui();
 void fthandleinput();
 void fthandlenormal();
 int getcharwidth(wchar_t c);
+int getlinewidth(char *s);
 int getcurrmode();
 void insnewline();
 bool ismodeactive(int mode);
+struct Buffer *loadbufferfromfile(char *path);
+int max(int x, int y);
+int min(int x, int y);
 void movecursor(int x, int y);
+void movebol();
 void movedown();
+void moveeol();
 void moveleft();
 void moveright();
 void moveup();
 void quit();
 void quitmode();
+void renderbuffer(struct Buffer *buffer);
 void setmode(int mode);
 void setmodeinsert();
 void setmodenormal();
@@ -55,12 +70,20 @@ int cursory = 0;
 
 const int modescount = sizeof(modes) / sizeof(struct InputMode);
 
+struct Buffer *mainbuf = NULL;
+
 int
 clampi(int x, int min, int max)
 {
 	if (x <= min) return min;
 	if (x >= max) return max;
 	return x;
+}
+
+int
+currline(struct Buffer *buffer)
+{
+	return clampi(buffer->topline + cursory, 0, buffer->linescnt - 1);
 }
 
 void
@@ -88,9 +111,18 @@ drawui()
 		mvprintw(LINES - 1, 0, mstr);
 	}
 
-	// Print version string
-	const char *vstr = "ted - Version " VERSION;
-	mvprintw(LINES - 1, COLS - strlen(vstr), vstr);
+	// Print current buffer information
+	if (mainbuf)
+	{
+		char bstr[64];
+		int line = currline(mainbuf);
+		char *linestr = mainbuf->lines[line];
+		int width = getlinewidth(linestr);
+		sprintf(bstr, "Col %d / %d | Line %d / %d", 
+				cursorx, width,
+				line + 1, mainbuf->linescnt);
+		mvprintw(LINES - 1, COLS - 32, bstr);
+	}
 }
 
 void
@@ -116,7 +148,7 @@ getcharwidth(wchar_t c)
 	// If the fake window was not yet initialized, do it here
 	if (fakewin == NULL)
 	{
-		fakewin = newwin(2, 10, 0, 0);
+		fakewin = newwin(LINES, COLS, 0, 0);
 	}
 
 	// Move to position (0, 0)
@@ -124,6 +156,34 @@ getcharwidth(wchar_t c)
 
 	// Insert the character
 	waddch(fakewin, c);
+
+	// Get new x and y positions
+	int newx = 0, newy = 0;
+	getyx(fakewin, newy, newx);
+
+	// Return x position
+	return newx;
+}
+
+int
+getlinewidth(char *s)
+{
+	// If the fake window was not yet initialized, do it here
+	if (fakewin == NULL)
+	{
+		fakewin = newwin(LINES, COLS, 0, 0);
+	}
+
+	// Move to position (0, 0)
+	wmove(fakewin, 0, 0);
+
+	// Before inserting the string, replace the last character (will be a newline) with a \0 character.
+	// This is very hacky and makes this piece of code just beautiful.
+	int len = strlen(s);
+	char prev = s[len - 2];
+	s[len - 2] = '\0';
+	waddstr(fakewin, s); // Insert the string
+	s[len - 2] = prev;
 
 	// Get new x and y positions
 	int newx = 0, newy = 0;
@@ -155,17 +215,107 @@ ismodeactive(int mode)
 	return currmode == mode;
 }
 
+struct Buffer *
+loadbufferfromfile(char *path)
+{
+	FILE *fp;
+	char *line;
+	size_t len = 0;
+	ssize_t read;
+
+	// Try to open the given file
+	fp = fopen(path, "r");
+	if (fp == NULL)
+	{
+		fprintf(stderr, "Failed reading file '%s'\n", path);
+		exit(EXIT_FAILURE);
+	}
+
+	// Create the main buffer
+	const unsigned int linescapincr = 128;
+	unsigned int linescap = linescapincr;
+	struct Buffer *buf = (struct Buffer *) malloc(sizeof(struct Buffer));
+	buf->linescnt = 0;
+	buf->lines = (char **) malloc(linescap * sizeof(char *));
+	buf->topline = 0;
+
+	// Read the file
+	int lineidx = 0;
+	while ((read = getline(&line, &len, fp)) != -1)
+	{
+		// If the number of lines read exceeds the capacity, reallocate the buffer
+		if (buf->linescnt > linescap)
+		{
+			linescap += linescapincr;
+			buf->lines = (char **) realloc(buf->lines, linescap * sizeof(char *));
+		}
+
+		// Create a new line entry in the buffer and copy over the
+		// line that was read from the file.
+		// Ignore the newline at the end of the line.
+		buf->lines[lineidx] = malloc(len * sizeof(char));
+		buf->linescnt += 1;
+		strcpy(buf->lines[lineidx], line);
+		lineidx++;
+	}
+
+	return buf;
+}
+
+int
+max(int x, int y)
+{
+	if (x > y) return x;
+	return y;
+}
+
+int
+min(int x, int y)
+{
+	if (x < y) return x;
+	return y;
+}
+
 void
 movecursor(int x, int y)
 {
-	mvchgat(cursory, cursorx, 1, A_NORMAL, 0, NULL);  // Reset attributes for previous position
-	cursorx = clampi(x, 0, COLS - 1);
-	cursory = clampi(y, 0, LINES - 2);                // -2, so the cursor can't enter the status bar
+	// Reset attributes for previous position
+	mvchgat(cursory, cursorx, 1, A_NORMAL, 0, NULL);  
+
+	// Perform vertical window border movement
+	int yoff = y - cursory;
+	if ((cursory == 0 && yoff < 0) || (cursory == LINES - 2 && yoff > 0))
+	{
+		mainbuf->topline = clampi(mainbuf->topline + yoff, 0, mainbuf->linescnt - LINES + 1);
+	}
+	int maxline = min(LINES - 2, mainbuf->linescnt - 1);
+	cursory = clampi(y, 0, maxline);
+
+	// Clamp the cursor X coordinate to 0 and the length of the current line
+	int mainbufline = currline(mainbuf);
+	char *linestr = mainbuf->lines[mainbufline];
+	int linewidth = getlinewidth(linestr);
+	cursorx = clampi(x, 0, linewidth);
+
+	// Move the cursor
 	move(cursory, cursorx);
-	mvchgat(cursory, cursorx, 1, A_REVERSE, 0, NULL); // Set new attribute for new position
+
+	// Set new attribute for new position
+	mvchgat(cursory, cursorx, 1, A_REVERSE, 0, NULL); 
 }
 
+void movebol()   { movecursor(0, cursory); }
 void movedown()  { movecursor(cursorx, cursory + 1); }
+void moveeol()
+{
+	int mainbufline = currline(mainbuf);
+	char *linestr = mainbuf->lines[mainbufline];
+	if (linestr)
+	{
+		int linewidth = getlinewidth(linestr);
+		movecursor(linewidth, cursory);
+	}
+}
 void moveleft()  { movecursor(cursorx - 1, cursory); }
 void moveright() { movecursor(cursorx + 1, cursory); }
 void moveup()    { movecursor(cursorx, cursory - 1); }
@@ -205,6 +355,16 @@ quitmode()
 		setmode(MODE_NORMAL); 
 		return; 
 	}
+}
+
+void
+renderbuffer(struct Buffer *buffer)
+{
+	for (int line = 0; line < LINES - 1 && (buffer->topline + line) < buffer->linescnt; ++line)
+	{
+		mvprintw(line, 0, buffer->lines[buffer->topline + line]);
+	}
+	movecursor(cursorx, cursory);
 }
 
 void 
@@ -255,6 +415,9 @@ break_loop:
 			}
 		}
 
+		// Render the currently loaded buffer
+		renderbuffer(mainbuf);
+
 		// Draw UI
 		drawui();
 
@@ -266,9 +429,16 @@ break_loop:
 	}
 }
 
-int 
-main(void)
+int
+main(int argc, char *argv[])
 {
+	// Load the file
+	if (argc >= 2)
+	{
+		char *path = argv[1];
+		mainbuf = loadbufferfromfile(path);
+	}
+
 	setlocale(locale, "");
 
 	// Initialize ncurses
