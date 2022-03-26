@@ -177,9 +177,9 @@ ismodeactive(int mode)
 void
 movecursor(int x, int y)
 {
-	mvchgat(cursory, cursorx, 1, A_NORMAL, 0, NULL); // Reset attributes for previous position
-	cursorx = clampi(x, 0, COLS);
-	cursory = clampi(y, 0, LINES);
+	mvchgat(cursory, cursorx, 1, A_NORMAL, 0, NULL);  // Reset attributes for previous position
+	cursorx = clampi(x, 0, COLS - 1);
+	cursory = clampi(y, 0, LINES - 2);                // -2, so the cursor can't enter the status bar
 	move(cursory, cursorx);
 	mvchgat(cursory, cursorx, 1, A_REVERSE, 0, NULL); // Set new attribute for new position
 }
