@@ -26,9 +26,16 @@ struct InputMode
 	InputModeFallthroughHandler fallthrough;
 };
 
+struct BufferLine
+{
+	char *text;
+	unsigned int length;
+	unsigned int width;
+};
+
 struct Buffer
 {
-	char **lines;
+	struct BufferLine *lines;
 	unsigned int linescnt;
 	int topline;
 };
@@ -116,8 +123,7 @@ drawui()
 	{
 		char bstr[64];
 		int line = currline(mainbuf);
-		char *linestr = mainbuf->lines[line];
-		int width = getlinewidth(linestr);
+		int width = mainbuf->lines[line].width;
 		sprintf(bstr, "Col %d / %d | Line %d / %d", 
 				cursorx, width,
 				line + 1, mainbuf->linescnt);
@@ -247,7 +253,7 @@ loadbufferfromfile(char *path)
 	unsigned int linescap = linescapincr;
 	struct Buffer *buf = (struct Buffer *) malloc(sizeof(struct Buffer));
 	buf->linescnt = 0;
-	buf->lines = (char **) malloc(linescap * sizeof(char *));
+	buf->lines = (struct BufferLine *) malloc(linescap * sizeof(struct BufferLine));
 	buf->topline = 0;
 
 	// Read the file
@@ -261,20 +267,25 @@ loadbufferfromfile(char *path)
 		if (buf->linescnt >= linescap)
 		{
 			linescap += linescapincr;
-			buf->lines = (char **) realloc(buf->lines, linescap * sizeof(char *));
+			buf->lines = (struct BufferLine *) realloc(buf->lines, linescap * sizeof(struct BufferLine));
 		}
 
-		// If the line has a length of 0, insert a NULL pointer.
+		// If the line has a length of 0, insert an empty line.
 		if (len == 0)
 		{
-			buf->lines[buf->linescnt] = NULL;
+			struct BufferLine bufline = { .text = NULL, .length = 0, .width = 0 };
+			buf->lines[buf->linescnt] = bufline;
 		}
 		// Create a new line entry in the buffer and copy over the
 		// line that was read from the file.
 		else
 		{
-			buf->lines[buf->linescnt] = (char *) malloc(len * sizeof(char));
-			strcpy(buf->lines[buf->linescnt], line);
+			struct BufferLine bufline;
+			bufline.text = (char *) malloc(len * sizeof(char));
+			strcpy(bufline.text, line);
+			bufline.length = len;
+			bufline.width = getlinewidth(line);
+			buf->lines[buf->linescnt] = bufline;
 		}
 
 		buf->linescnt += 1;
@@ -317,9 +328,15 @@ movecursor(int x, int y)
 
 	// Clamp the cursor X coordinate to 0 and the length of the current line
 	int mainbufline = currline(mainbuf);
-	char *linestr = mainbuf->lines[mainbufline];
-	int linewidth = getlinewidth(linestr);
-	cursorx = clampi(x, 0, linewidth);
+	if (mainbufline < mainbuf->linescnt)
+	{
+		struct BufferLine ln = mainbuf->lines[mainbufline];
+		cursorx = clampi(x, 0, ln.width);
+	}
+	else
+	{
+		cursorx = 0;
+	}
 
 	// Move the cursor
 	move(cursory, cursorx);
@@ -333,12 +350,8 @@ void movedown()  { movecursor(cursorx, cursory + 1); }
 void moveeol()
 {
 	int mainbufline = currline(mainbuf);
-	char *linestr = mainbuf->lines[mainbufline];
-	if (linestr)
-	{
-		int linewidth = getlinewidth(linestr);
-		movecursor(linewidth, cursory);
-	}
+	int linewidth = mainbuf->lines[mainbufline].width;
+	movecursor(linewidth, cursory);
 }
 void moveleft()  { movecursor(cursorx - 1, cursory); }
 void moveright() { movecursor(cursorx + 1, cursory); }
@@ -367,7 +380,7 @@ quit()
 {
 	for (int i = 0; i < mainbuf->linescnt; ++i)
 	{
-		char *ptr = mainbuf->lines[i];
+		char *ptr = mainbuf->lines[i].text;
 		if (ptr)
 		{
 			free(ptr);
@@ -397,7 +410,7 @@ renderbuffer(struct Buffer *buffer)
 {
 	for (int line = 0; line < LINES - 1 && (buffer->topline + line) < buffer->linescnt; ++line)
 	{
-		mvaddstr(line, 0, buffer->lines[buffer->topline + line]);
+		mvaddstr(line, 0, buffer->lines[buffer->topline + line].text);
 	}
 	movecursor(cursorx, cursory);
 }
@@ -467,13 +480,6 @@ break_loop:
 int
 main(int argc, char *argv[])
 {
-	// Load the file
-	if (argc >= 2)
-	{
-		char *path = argv[1];
-		mainbuf = loadbufferfromfile(path);
-	}
-
 	setlocale(locale, "");
 
 	// Initialize ncurses
@@ -491,6 +497,13 @@ main(int argc, char *argv[])
 
 	// Make getch a non-blocking call
 	nodelay(stdscr, TRUE);
+
+	// Load the file
+	if (argc >= 2)
+	{
+		char *path = argv[1];
+		mainbuf = loadbufferfromfile(path);
+	}
 
 	// Run ted
 	run();
