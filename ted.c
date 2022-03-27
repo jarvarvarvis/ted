@@ -5,7 +5,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#define OFFSET(x) (1 << x)	
+#define OFFSET(x) (1 << x)
 
 // Function and struct definitions
 typedef void (*KeybindFunction)();
@@ -168,6 +168,10 @@ getcharwidth(wchar_t c)
 int
 getlinewidth(char *s)
 {
+	// If the string is NULL, return a width of 0
+	if (s == NULL)
+		return 0;
+
 	// If the fake window was not yet initialized, do it here
 	if (fakewin == NULL)
 	{
@@ -180,10 +184,22 @@ getlinewidth(char *s)
 	// Before inserting the string, replace the last character (will be a newline) with a \0 character.
 	// This is very hacky and makes this piece of code just beautiful.
 	int len = strlen(s);
-	char prev = s[len - 2];
-	s[len - 2] = '\0';
+	bool cleanup = false;
+	if (len > 1)
+	{
+		if (s[len - 1] == '\n')
+		{
+			s[len - 1] = '\0';
+			cleanup = true;
+		}
+	}
+
 	waddstr(fakewin, s); // Insert the string
-	s[len - 2] = prev;
+
+	if (cleanup)
+	{
+		s[len - 1] = '\n';
+	}
 
 	// Get new x and y positions
 	int newx = 0, newy = 0;
@@ -218,13 +234,8 @@ ismodeactive(int mode)
 struct Buffer *
 loadbufferfromfile(char *path)
 {
-	FILE *fp;
-	char *line;
-	size_t len = 0;
-	ssize_t read;
-
 	// Try to open the given file
-	fp = fopen(path, "r");
+	FILE *fp = fopen(path, "r");
 	if (fp == NULL)
 	{
 		fprintf(stderr, "Failed reading file '%s'\n", path);
@@ -240,24 +251,37 @@ loadbufferfromfile(char *path)
 	buf->topline = 0;
 
 	// Read the file
-	int lineidx = 0;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+
 	while ((read = getline(&line, &len, fp)) != -1)
 	{
 		// If the number of lines read exceeds the capacity, reallocate the buffer
-		if (buf->linescnt > linescap)
+		if (buf->linescnt >= linescap)
 		{
 			linescap += linescapincr;
 			buf->lines = (char **) realloc(buf->lines, linescap * sizeof(char *));
 		}
 
+		// If the line has a length of 0, insert a NULL pointer.
+		if (len == 0)
+		{
+			buf->lines[buf->linescnt] = NULL;
+		}
 		// Create a new line entry in the buffer and copy over the
 		// line that was read from the file.
-		// Ignore the newline at the end of the line.
-		buf->lines[lineidx] = malloc(len * sizeof(char));
+		else
+		{
+			buf->lines[buf->linescnt] = (char *) malloc(len * sizeof(char));
+			strcpy(buf->lines[buf->linescnt], line);
+		}
+
 		buf->linescnt += 1;
-		strcpy(buf->lines[lineidx], line);
-		lineidx++;
 	}
+
+	// Clean up memory that was previously used to store the line
+	free(line);
 
 	return buf;
 }
@@ -341,6 +365,17 @@ setmodenormal()
 void 
 quit()
 {
+	for (int i = 0; i < mainbuf->linescnt; ++i)
+	{
+		char *ptr = mainbuf->lines[i];
+		if (ptr)
+		{
+			free(ptr);
+		}
+	}
+	free(mainbuf->lines);
+	free(mainbuf);
+
 	// Delete the fake window
 	delwin(fakewin);
 
