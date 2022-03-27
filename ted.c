@@ -108,7 +108,7 @@ drawui()
 	if (currmodeidx != -1)
 	{
 		sprintf(mstr, "[ %s mode ]", modes[currmodeidx].name);
-		mvprintw(LINES - 1, 0, mstr);
+		mvaddstr(LINES - 1, 0, mstr);
 	}
 
 	// Print current buffer information
@@ -121,7 +121,7 @@ drawui()
 		sprintf(bstr, "Col %d / %d | Line %d / %d", 
 				cursorx, width,
 				line + 1, mainbuf->linescnt);
-		mvprintw(LINES - 1, COLS - 32, bstr);
+		mvaddstr(LINES - 1, COLS - 32, bstr);
 	}
 }
 
@@ -362,7 +362,7 @@ renderbuffer(struct Buffer *buffer)
 {
 	for (int line = 0; line < LINES - 1 && (buffer->topline + line) < buffer->linescnt; ++line)
 	{
-		mvprintw(line, 0, buffer->lines[buffer->topline + line]);
+		mvaddstr(line, 0, buffer->lines[buffer->topline + line]);
 	}
 	movecursor(cursorx, cursory);
 }
